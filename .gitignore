@@ -1,0 +1,11 @@
+# Local overrides / secrets
+.env.local
+*.local
+
+# Elasticsearch data (if ever bind-mounted)
+esdata/
+data/
+
+# OS / editor cruft
+.DS_Store
+*.swp
