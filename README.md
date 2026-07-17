@@ -56,7 +56,7 @@ Bash/SSH tools. Run the steps in order and report the outcome of each.
 
 3. **Get the Krabbit source onto the host.** Either clone the repo:
    ```sh
-   git clone <KRABBIT_REPO_URL> krabbit && cd krabbit
+   git clone https://github.com/timtty/krabbit.git && cd krabbit
    ```
    or, if there is no remote, copy this project directory to the host (e.g.
    `rsync -a ./ user@server:~/krabbit/`) and `cd` into it.
