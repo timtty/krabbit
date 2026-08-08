@@ -112,8 +112,18 @@ put "_index_template/sip-honeypot" '{
         "ruri":                { "type": "keyword", "ignore_above": 1024 },
         "from_uri":            { "type": "keyword", "ignore_above": 1024 },
         "from_user":           { "type": "keyword", "ignore_above": 256 },
+        "from_display":        { "type": "keyword", "ignore_above": 256,
+                                 "fields": { "text": { "type": "text" } } },
+        "p_asserted_identity":  { "type": "keyword", "ignore_above": 1024,
+                                 "fields": { "text": { "type": "text" } } },
+        "p_preferred_identity": { "type": "keyword", "ignore_above": 1024,
+                                 "fields": { "text": { "type": "text" } } },
+        "remote_party_id":     { "type": "keyword", "ignore_above": 1024,
+                                 "fields": { "text": { "type": "text" } } },
         "to_uri":              { "type": "keyword", "ignore_above": 1024 },
         "to_user":             { "type": "keyword", "ignore_above": 256 },
+        "to_display":          { "type": "keyword", "ignore_above": 256,
+                                 "fields": { "text": { "type": "text" } } },
         "call_id":             { "type": "keyword", "ignore_above": 256 },
         "cseq":                { "type": "keyword", "ignore_above": 128 },
         "user_agent":          { "type": "keyword", "ignore_above": 512 },
@@ -140,6 +150,27 @@ put "_index_template/sip-honeypot" '{
 # 5. Bootstrap the first backing index with the write alias.
 put "sip-honeypot-000001" '{
   "aliases": { "sip-honeypot": { "is_write_index": true } }
+}' 1
+
+# 6. Back-fill newer fields onto indices that already exist. Index templates only
+#    apply at creation time, so on an upgraded deployment the live index would
+#    otherwise dynamic-map these (text + .keyword) instead of using the mapping
+#    above. Tolerant: if a field was already dynamically mapped with a different
+#    type this fails harmlessly — roll the alias
+#    (`curl -XPOST $OS/sip-honeypot/_rollover`) to get a clean index.
+put "sip-honeypot-*/_mapping" '{
+  "properties": {
+    "from_display":         { "type": "keyword", "ignore_above": 256,
+                              "fields": { "text": { "type": "text" } } },
+    "to_display":           { "type": "keyword", "ignore_above": 256,
+                              "fields": { "text": { "type": "text" } } },
+    "p_asserted_identity":  { "type": "keyword", "ignore_above": 1024,
+                              "fields": { "text": { "type": "text" } } },
+    "p_preferred_identity": { "type": "keyword", "ignore_above": 1024,
+                              "fields": { "text": { "type": "text" } } },
+    "remote_party_id":      { "type": "keyword", "ignore_above": 1024,
+                              "fields": { "text": { "type": "text" } } }
+  }
 }' 1
 
 echo "bootstrap: done."

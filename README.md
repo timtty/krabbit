@@ -116,6 +116,12 @@ Then continue with the reference material below.
   guesses, all of which are logged (`auth_username`, `authorization`).
 - **Reveals toll-fraud intent.** INVITE `To:` users (the numbers attackers try
   to dial) are captured in `to_user`.
+- **Captures spoofed branding.** The display names (`from_display`,
+  `to_display`) and the asserted-identity headers (`p_asserted_identity`,
+  `p_preferred_identity`, `remote_party_id`) are logged, so impersonation of a
+  bank/carrier is visible — the URIs alone never show it. Each is a `keyword`
+  with a `.text` subfield, so you can aggregate exact names *and* full-text hunt
+  for brands.
 - **Geo-locates attackers** via OpenSearch's `ip2geo` ingest processor
   (`src_geo.location`, `src_geo.country_name`, …).
 
@@ -175,6 +181,8 @@ curl -s 'http://127.0.0.1:9200/sip-honeypot/_search?pretty' \
 | `src_ip` / `src_port` / `transport` | Attacker source |
 | `src_geo.*` | ip2geo enrichment of `src_ip` (`location` is a `geo_point`) |
 | `from_user` / `from_uri` | Claimed identity |
+| `from_display` / `to_display` | `From:` / `To:` display names — where a spoofed brand (`"WELLS FARGO" <sip:…>`) shows up |
+| `p_asserted_identity` / `p_preferred_identity` / `remote_party_id` | Asserted-identity headers (raw), the other place a brand string is carried |
 | `to_user` / `to_uri` / `ruri` | Target (dial target for toll-fraud INVITEs) |
 | `user_agent` | Scanner fingerprint (e.g. `friendly-scanner`) |
 | `auth_username` | Username in a credential guess |
