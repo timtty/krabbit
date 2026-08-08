@@ -47,6 +47,10 @@ services:
     depends_on:
       os-init:
         condition: service_completed_successfully
+    # Where Kamailio POSTs events. Reachable by service name on the compose
+    # network; the Linux overlay switches this to loopback (see below).
+    environment:
+      - KRABBIT_ES_URL=http://opensearch:9200/sip-honeypot/_doc
     ports:
       - "${SIP_BIND:-0.0.0.0}:5060:5060/udp"
       - "${SIP_BIND:-0.0.0.0}:5060:5060/tcp"
