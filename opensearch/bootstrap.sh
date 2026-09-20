@@ -126,6 +126,8 @@ put "_index_template/sip-honeypot" '{
         "method":              { "type": "keyword" },
         "src_ip":              { "type": "ip" },
         "src_port":            { "type": "integer" },
+        "dst_ip":              { "type": "ip" },
+        "dst_port":            { "type": "integer" },
         "transport":           { "type": "keyword" },
         "realm":               { "type": "keyword" },
         "ruri":                { "type": "keyword", "ignore_above": 1024 },
@@ -192,6 +194,8 @@ put "sip-honeypot-000001" '{
 #    which starts a fresh write index built from the template above.
 BACKFILL_MAPPING='{
   "properties": {
+    "dst_ip":               { "type": "ip" },
+    "dst_port":             { "type": "integer" },
     "from_display":         { "type": "keyword", "ignore_above": 256,
                               "fields": { "text": { "type": "text" } } },
     "to_display":           { "type": "keyword", "ignore_above": 256,

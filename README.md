@@ -183,6 +183,7 @@ curl -s 'http://127.0.0.1:9200/sip-honeypot/_search?pretty' \
 | `@timestamp` | Set by the ingest pipeline |
 | `method` | SIP method (REGISTER, INVITE, OPTIONS, …) |
 | `src_ip` / `src_port` / `transport` | Attacker source |
+| `dst_ip` / `dst_port` | Which of *our* addresses was hit — see [Per-address attribution](#per-address-attribution-dst_ip) |
 | `src_geo.*` | ip2geo enrichment of `src_ip` (`location` is a `geo_point`) |
 | `from_user` / `from_uri` | Claimed identity |
 | `from_display` / `to_display` | `From:` / `To:` display names — where a spoofed brand (`"WELLS FARGO" <sip:…>`) shows up |
@@ -237,6 +238,41 @@ meaningless published ports, and points `KRABBIT_ES_URL` at
 `http://127.0.0.1:9200/...` — host networking takes Kamailio off the compose
 network, so the `opensearch` service name stops resolving and it has to reach
 OpenSearch on loopback, where OpenSearch already publishes.
+
+## Per-address attribution (`dst_ip`)
+
+If more than one public address is ever routed to this host, `src_ip` alone
+cannot tell you *which* of them a scanner hit. `dst_ip` records that, and it has
+to be captured at the time — events indexed without it can never be back-filled.
+
+It comes from `$Ri`, the address of the socket that received the message. That
+detail is the whole trick, because **a wildcard bind is one socket for every
+address**. Measured on a Kamailio 5.6.3 host with two addresses routed to it:
+
+```
+listen=udp:0.0.0.0:5099   -> $Ri=0.0.0.0     for every packet, whichever address was hit
+listen=udp:<iface>:5099   -> $Ri=10.99.99.1 / 10.99.99.2  correctly, per packet
+```
+
+So `listen=` must name an interface (or a single address), never `0.0.0.0`, or
+`dst_ip` is populated with `0.0.0.0` and is silently worthless. The overlay sets
+`KRABBIT_SIP_LISTEN=enp8s0` for exactly this reason; the Dockerfile default is
+`0.0.0.0`, which is fine for local/Docker Desktop use where the container is
+bridge-networked and the destination address is the container's anyway.
+
+Naming the **interface** rather than the addresses means routing another `/32`
+to it needs no config change — just `docker compose restart kamailio` to pick
+the new address up. Find the interface name on the host with `ip -4 -o addr show`.
+
+Two caveats worth knowing:
+
+- **Not retroactive.** Documents indexed before this shipped have no `dst_ip`.
+  With 60-day ISM retention the alias is fully covered ~60 days after deploy;
+  until then a query spanning the cutover silently mixes attributed and
+  unattributed events. Add `exists: dst_ip` or a date floor if that matters.
+- **`ruri` is not a substitute.** It usually holds the target address, but it is
+  attacker-controlled, and it is absent exactly on the malformed requests that
+  are most worth attributing.
 
 `docker-compose.override.yml` is gitignored, so the host keeps its own setup
 without leaving edits in the working tree for `git pull` to trip over.

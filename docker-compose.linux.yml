@@ -26,3 +26,10 @@ services:
     # publishes on 127.0.0.1:9200, so reach it there.
     environment:
       - KRABBIT_ES_URL=http://127.0.0.1:9200/sip-honeypot/_doc
+      # Bind each address on this interface to its own socket, so $Ri — and
+      # therefore dst_ip — reports which of our addresses an attacker hit. A
+      # wildcard bind is one socket for all addresses and reports 0.0.0.0.
+      # Naming the interface rather than the addresses means routing another
+      # /32 to enp8s0 needs no change here, only `docker compose restart
+      # kamailio`. Check the name on the host: `ip -4 -o addr show`.
+      - KRABBIT_SIP_LISTEN=enp8s0
