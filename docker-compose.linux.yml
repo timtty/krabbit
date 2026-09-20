@@ -1,0 +1,28 @@
+# Linux deployment overlay — use this on the real honeypot host.
+#
+# Enable it once, per host, by symlinking it to the file Compose auto-loads:
+#
+#     ln -s docker-compose.linux.yml docker-compose.override.yml
+#
+# After that plain `docker compose up -d` picks it up, with no -f flags to
+# forget. `docker-compose.override.yml` is gitignored, so this stays out of the
+# working tree and `git pull` never conflicts.
+#
+# Not for Docker Desktop (macOS/Windows) — host networking behaves differently
+# there. The base docker-compose.yml already works on those platforms as-is.
+services:
+  kamailio:
+    # Host networking so Kamailio sees the real attacker source IP. Docker's
+    # userland proxy NATs packets sent from the same host, and any NAT in front
+    # of Kamailio rewrites src_ip — which silently destroys src_ip, src_geo and
+    # every per-IP analysis built on them. There is no error when this goes
+    # wrong, only wrong data, so prefer host networking on the real deployment.
+    network_mode: host
+    # Published ports are meaningless under host networking (Kamailio binds the
+    # host's 5060 directly) and Docker warns if they are left set.
+    ports: !reset []
+    # Host networking takes Kamailio off the compose network, so the
+    # "opensearch" service name no longer resolves. OpenSearch already
+    # publishes on 127.0.0.1:9200, so reach it there.
+    environment:
+      - KRABBIT_ES_URL=http://127.0.0.1:9200/sip-honeypot/_doc

@@ -2,7 +2,7 @@
 # Idempotently configure OpenSearch for the SIP honeypot:
 #   1. ip2geo datasource -> downloads GeoLite2-City data (geospatial plugin)
 #   2. ingest pipeline   -> geo enrichment (ip2geo) + @timestamp
-#   3. ISM policy        -> daily rollover, delete after 90 days (OpenSearch's ILM)
+#   3. ISM policy        -> daily rollover, delete after 60 days (OpenSearch's ILM)
 #   4. index template    -> field mappings + wires in the pipeline & ISM rollover
 #   5. bootstrap index   -> "sip-honeypot-000001" with write alias "sip-honeypot"
 #
@@ -66,7 +66,7 @@ put "_ingest/pipeline/sip-honeypot" '{
   ]
 }'
 
-# 3. ISM policy: roll daily (or at 10gb), delete after 90 days. Auto-attaches to
+# 3. ISM policy: roll daily (or at 10gb), delete after 60 days. Auto-attaches to
 #    sip-honeypot-* via ism_template.
 put "_plugins/_ism/policies/sip-honeypot" '{
   "policy": {
@@ -76,7 +76,7 @@ put "_plugins/_ism/policies/sip-honeypot" '{
       {
         "name": "hot",
         "actions": [ { "rollover": { "min_index_age": "1d", "min_primary_shard_size": "10gb" } } ],
-        "transitions": [ { "state_name": "delete", "conditions": { "min_index_age": "90d" } } ]
+        "transitions": [ { "state_name": "delete", "conditions": { "min_index_age": "60d" } } ]
       },
       {
         "name": "delete",
@@ -155,10 +155,16 @@ put "sip-honeypot-000001" '{
 # 6. Back-fill newer fields onto indices that already exist. Index templates only
 #    apply at creation time, so on an upgraded deployment the live index would
 #    otherwise dynamic-map these (text + .keyword) instead of using the mapping
-#    above. Tolerant: if a field was already dynamically mapped with a different
-#    type this fails harmlessly — roll the alias
-#    (`curl -XPOST $OS/sip-honeypot/_rollover`) to get a clean index.
-put "sip-honeypot-*/_mapping" '{
+#    above.
+#
+#    If a field was already dynamically mapped with the wrong type, the PUT
+#    fails and the type cannot be changed in place — OpenSearch rejects it with
+#    "cannot be changed from type [text] to [keyword]". Left alone that is a
+#    *silent* fault: a terms agg spanning the alias still returns HTTP 200 with
+#    plausible buckets, but the mis-mapped shard fails and its documents are
+#    quietly missing from the totals. So detect that case and roll the alias,
+#    which starts a fresh write index built from the template above.
+BACKFILL_MAPPING='{
   "properties": {
     "from_display":         { "type": "keyword", "ignore_above": 256,
                               "fields": { "text": { "type": "text" } } },
@@ -171,6 +177,35 @@ put "sip-honeypot-*/_mapping" '{
     "remote_party_id":      { "type": "keyword", "ignore_above": 1024,
                               "fields": { "text": { "type": "text" } } }
   }
-}' 1
+}'
+
+code=$(curl -s -o /tmp/os_resp -w '%{http_code}' -X PUT \
+    -H 'Content-Type: application/json' "$OS/sip-honeypot-*/_mapping" \
+    -d "$BACKFILL_MAPPING")
+
+if [ "$code" -lt 300 ]; then
+    echo "bootstrap: PUT /sip-honeypot-*/_mapping -> HTTP $code (ok)"
+else
+    echo "bootstrap: PUT /sip-honeypot-*/_mapping -> HTTP $code"
+    cat /tmp/os_resp; echo
+    if grep -q 'cannot be changed from type' /tmp/os_resp; then
+        echo "bootstrap: existing index has a conflicting mapping; rolling the alias."
+        rcode=$(curl -s -o /tmp/os_roll -w '%{http_code}' -X POST "$OS/sip-honeypot/_rollover")
+        echo "bootstrap: POST /sip-honeypot/_rollover -> HTTP $rcode"
+        cat /tmp/os_roll; echo
+        if [ "$rcode" -ge 300 ]; then
+            echo "bootstrap: WARNING: rollover failed. New events will keep the wrong"
+            echo "bootstrap:          mapping and aggregations on the new fields will"
+            echo "bootstrap:          under-count. Fix before trusting that data."
+        else
+            # The conflicting index keeps its bad mapping until ISM deletes it.
+            # Queries spanning the alias still under-count until then, so name it.
+            echo "bootstrap: rolled. New events map correctly from here on; the older"
+            echo "bootstrap:          index keeps the wrong mapping until ISM expires"
+            echo "bootstrap:          it, so aggregations covering that window stay"
+            echo "bootstrap:          incomplete. Reindex it if you need that history."
+        fi
+    fi
+fi
 
 echo "bootstrap: done."

@@ -2,6 +2,11 @@
 .env.local
 *.local
 
+# Per-host Compose overlay. On the Linux honeypot this is a symlink to the
+# tracked docker-compose.linux.yml; keeping it untracked means `git pull`
+# never has to merge around a host-specific edit.
+docker-compose.override.yml
+
 # Elasticsearch data (if ever bind-mounted)
 esdata/
 data/

@@ -14,6 +14,11 @@ RUN apt-get update \
         netbase \
     && rm -rf /var/lib/apt/lists/*
 
+# Default OpenSearch endpoint, read by kamailio.cfg via $env(). Compose
+# overrides it per deployment; the default keeps the image usable on its own
+# rather than starting with an empty URL and silently dropping every event.
+ENV KRABBIT_ES_URL=http://opensearch:9200/sip-honeypot/_doc
+
 COPY kamailio.cfg /etc/kamailio/kamailio.cfg
 
 # Validate the config at build time so a syntax error fails the build, not runtime.

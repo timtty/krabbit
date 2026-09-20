@@ -68,9 +68,13 @@ Bash/SSH tools. Run the steps in order and report the outcome of each.
    ```
 
 5. **Configure `.env`.** For a real deployment leave `SIP_BIND=0.0.0.0`. Bump
-   `OPENSEARCH_HEAP` (e.g. `1g`) if the host has spare RAM. For maximum fidelity
-   of attacker source IPs on Linux, prefer host networking (see
-   "Preserving the real attacker IP" below).
+   `OPENSEARCH_HEAP` (e.g. `1g`) if the host has spare RAM. On Linux, also
+   enable the host-networking overlay — it is the difference between recording
+   real attacker IPs and recording a NAT gateway:
+   ```sh
+   ln -s docker-compose.linux.yml docker-compose.override.yml
+   ```
+   See "Preserving the real attacker IP" below.
 
 6. **Launch:**
    ```sh
@@ -207,7 +211,7 @@ curl -s 'http://127.0.0.1:9200/sip-honeypot/_search?pretty' \
 
 `sip-honeypot` is an **ISM rollover alias** (created by
 `opensearch/bootstrap.sh`), so the Kamailio config never needs a date in the
-URL; indices roll daily and are deleted after 90 days.
+URL; indices roll daily and are deleted after 60 days.
 
 ## Preserving the real attacker IP (important)
 
@@ -219,18 +223,26 @@ gateway's IP — you'll see something like `192.168.65.1` / `172.x.x.x` in
 client IP, so a normal internet-facing deployment is usually fine.
 
 To be certain on a Linux production box, run Kamailio with host networking so
-there is no NAT at all. In `docker-compose.yml`, replace the `kamailio` service's
-`ports:` block with:
+there is no NAT at all. That is what `docker-compose.linux.yml` does — enable it
+once per host by symlinking it to the file Compose loads automatically:
 
-```yaml
-    network_mode: host        # Linux only; sees real source IPs, no NAT
+```sh
+ln -s docker-compose.linux.yml docker-compose.override.yml
+docker compose up -d --build
 ```
 
-and change `ES_URL` in `kamailio/kamailio.cfg` to `http://127.0.0.1:9200/...`
-(host networking means "opensearch" no longer resolves via the compose DNS).
-OpenSearch already publishes on `127.0.0.1:9200`. Host networking is not
-available on Docker Desktop for macOS/Windows — use it on the Linux host where
-the honeypot actually runs.
+From then on plain `docker compose up -d` picks it up, with no `-f` flags to
+forget. The overlay switches Kamailio to `network_mode: host`, clears the now
+meaningless published ports, and points `KRABBIT_ES_URL` at
+`http://127.0.0.1:9200/...` — host networking takes Kamailio off the compose
+network, so the `opensearch` service name stops resolving and it has to reach
+OpenSearch on loopback, where OpenSearch already publishes.
+
+`docker-compose.override.yml` is gitignored, so the host keeps its own setup
+without leaving edits in the working tree for `git pull` to trip over.
+
+Host networking is not available on Docker Desktop for macOS/Windows — leave the
+overlay off there and the base `docker-compose.yml` works as-is.
 
 ## Security & operational notes
 
