@@ -1,7 +1,7 @@
 #!/bin/sh
 # Idempotently configure OpenSearch for the SIP honeypot:
 #   1. ip2geo datasource -> downloads GeoLite2-City data (geospatial plugin)
-#   2. ingest pipeline   -> geo enrichment (ip2geo) + @timestamp
+#   2. ingest pipeline   -> geo enrichment (ip2geo) + ASN (geoip) + @timestamp
 #   3. ISM policy        -> daily rollover, delete after 60 days (OpenSearch's ILM)
 #   4. index template    -> field mappings + wires in the pipeline & ISM rollover
 #   5. bootstrap index   -> "sip-honeypot-000001" with write alias "sip-honeypot"
@@ -54,12 +54,31 @@ while [ "$i" -lt 30 ]; do
 done
 [ "${state:-}" = "AVAILABLE" ] || echo " (not ready yet; geo will fill in once it downloads)"
 
-# 2. Ingest pipeline: stamp @timestamp and geo-locate the attacker IP.
+# 2. Ingest pipeline: stamp @timestamp, geo-locate the attacker IP, and resolve
+#    its network operator.
+#
+#    Note the two enrichments use *different, unrelated* mechanisms:
+#      - src_geo: ip2geo processor (geospatial plugin) -> remote datasource,
+#        configured in step 1 above, refreshed over the network every 3 days.
+#      - src_asn: geoip processor (ingest-geoip module) -> GeoLite2-ASN.mmdb,
+#        shipped inside the image at modules/ingest-geoip/. No network needed,
+#        which matters: this is an internet-facing honeypot VM and we do not
+#        want to add an egress dependency for enrichment.
+#
+#    ignore_failure on the geoip processor is deliberate. The pipeline-level
+#    on_failure below stamps ingest_error, which is the health signal for parse
+#    problems; a hostile packet with an unparseable src_ip must not get filed as
+#    a parse failure just because ASN lookup choked on it. An IP simply missing
+#    from the database is not an error at all -- the processor leaves the target
+#    field unset and moves on.
 put "_ingest/pipeline/sip-honeypot" '{
   "description": "SIP honeypot enrichment",
   "processors": [
     { "set":    { "field": "@timestamp", "value": "{{{_ingest.timestamp}}}", "override": false } },
-    { "ip2geo": { "field": "src_ip", "datasource": "city", "target_field": "src_geo", "ignore_missing": true } }
+    { "ip2geo": { "field": "src_ip", "datasource": "city", "target_field": "src_geo", "ignore_missing": true } },
+    { "geoip":  { "field": "src_ip", "database_file": "GeoLite2-ASN.mmdb", "target_field": "src_asn",
+                  "properties": ["asn", "organization_name", "network"],
+                  "ignore_missing": true, "ignore_failure": true } }
   ],
   "on_failure": [
     { "set": { "field": "ingest_error", "value": "{{ _ingest.on_failure_message }}" } }
@@ -141,6 +160,13 @@ put "_index_template/sip-honeypot" '{
             "region_name":      { "type": "keyword" },
             "city_name":        { "type": "keyword" }
           }
+        },
+        "src_asn": {
+          "properties": {
+            "asn":               { "type": "long" },
+            "organization_name": { "type": "keyword" },
+            "network":           { "type": "keyword" }
+          }
         }
       }
     }
@@ -175,7 +201,14 @@ BACKFILL_MAPPING='{
     "p_preferred_identity": { "type": "keyword", "ignore_above": 1024,
                               "fields": { "text": { "type": "text" } } },
     "remote_party_id":      { "type": "keyword", "ignore_above": 1024,
-                              "fields": { "text": { "type": "text" } } }
+                              "fields": { "text": { "type": "text" } } },
+    "src_asn": {
+      "properties": {
+        "asn":               { "type": "long" },
+        "organization_name": { "type": "keyword" },
+        "network":           { "type": "keyword" }
+      }
+    }
   }
 }'
 
